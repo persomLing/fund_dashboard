@@ -1,7 +1,15 @@
 let savedFunds = {};
 let lastResult = null;
+let lastPurchaseResult = null;
+let analyzeController = null;
+let purchaseController = null;
+let analyzeLoading = false;
+let purchaseLoading = false;
+let analyzeFundInfo = null;
+let purchaseFundInfo = null;
 
 const form = document.querySelector("#fundForm");
+const purchaseForm = document.querySelector("#purchaseForm");
 const statusPill = document.querySelector("#statusPill");
 const emptyState = document.querySelector("#emptyState");
 const resultView = document.querySelector("#resultView");
@@ -17,6 +25,11 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const ESCAPE_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => ESCAPE_MAP[c]);
+}
+
 function fmtPct(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   const num = Number(value);
@@ -26,6 +39,11 @@ function fmtPct(value, digits = 2) {
 function fmtMoney(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+}
+
+function fmtNumber(value, digits = 4) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return Number(value).toFixed(digits);
 }
 
 function pctColor(value) {
@@ -38,6 +56,51 @@ function pctColor(value) {
 function setStatus(text, type = "") {
   statusPill.textContent = text;
   statusPill.className = `server-pill ${type}`;
+}
+
+function syncStatusPill() {
+  const activeTab = document.querySelector(".tab-button.active")?.dataset?.tab;
+  if (analyzeLoading || purchaseLoading) {
+    const isCurrentLoading = activeTab === "strategyPage" ? analyzeLoading : purchaseLoading;
+    const currentInfo = activeTab === "strategyPage" ? analyzeFundInfo : purchaseFundInfo;
+    if (isCurrentLoading) {
+      setStatus("分析中", "busy");
+    } else {
+      setStatus("后台分析中", "busy");
+    }
+    if (isCurrentLoading && currentInfo) {
+      setFundTip(currentInfo.code, currentInfo.name);
+    } else {
+      setFundTip(null);
+    }
+  } else {
+    setStatus("就绪");
+    setFundTip(null);
+  }
+}
+
+function setFundTip(fundCode, fundName) {
+  const tip = byId("fundTip");
+  if (fundCode) {
+    const display = fundName ? `${fundCode} ${fundName}` : fundCode;
+    tip.textContent = `${display} 正在分析中`;
+    tip.classList.remove("hidden");
+  } else {
+    tip.classList.add("hidden");
+    tip.textContent = "";
+  }
+}
+
+function showErrorInState(container, message) {
+  if (!container) return;
+  container.classList.remove("hidden");
+  let el = container.querySelector(".error-text");
+  if (!el) {
+    el = document.createElement("p");
+    el.className = "reason error-text";
+    container.appendChild(el);
+  }
+  el.textContent = message || "操作失败";
 }
 
 function renderLoadingState() {
@@ -106,6 +169,10 @@ function restoreResultTemplate() {
       <article>
         <span id="ratioLabel">建议比例</span>
         <strong id="ratioValue">0%</strong>
+      </article>
+      <article>
+        <span>预估日涨跌幅</span>
+        <strong id="dailyValue">0%</strong>
       </article>
       <article>
         <span>预估持有收益</span>
@@ -334,6 +401,44 @@ async function copyLastResult() {
   }
 }
 
+function purchaseAnalysisSummary(analysis) {
+  if (!analysis) return "";
+  const market = (analysis.market || []).map((m) => `${m.name} ${fmtPct(m.pct)}`).join("，");
+  const usProxies = (analysis.usProxies || []).map((u) => `${u.symbol} ${fmtPct(u.pct)}`).join("，");
+  const holdings = (analysis.holdings || []).slice(0, 5).map((h) => `${h.name} ${fmtPct(h.contribution_pct)}`).join("，");
+  return [
+    `${analysis.fundCode} ${analysis.fundName || ""}`.trim(),
+    `结论：${analysis.verdict || "-"}（${analysis.score || 0}分）`,
+    `预估日涨跌幅：${fmtPct(analysis.estimatedDailyPct)}，预估净值：${fmtNumber(analysis.estimatedNav)}`,
+    `置信度：${analysis.confidence || "-"}，持仓覆盖：${analysis.coveragePct ? Number(analysis.coveragePct).toFixed(1) + "%" : "-"}`,
+    `原因：${analysis.reason || "-"}`,
+    `长期判断：${analysis.longTerm || "-"} ${analysis.notes || ""}`.trim(),
+    `大盘：${market || "-"}`,
+    `美股代理：${usProxies || "-"}`,
+    `重仓贡献：${holdings || "-"}`,
+  ].join("\n");
+}
+
+async function copyPurchaseResult() {
+  if (!lastPurchaseResult) {
+    setStatus("暂无结果", "error");
+    return;
+  }
+  const text = purchaseAnalysisSummary(lastPurchaseResult.analysis);
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus("已复制");
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+    setStatus("已复制");
+  }
+}
+
 function renderSignalChart(decision) {
   const rows = [
     ["决策信号", decision.estimated_fund_pct],
@@ -409,12 +514,12 @@ function renderDrivers(decision, details) {
         const left = contribution >= 0 ? 50 : 50 - width;
         const cls = contribution >= 0 ? "pos" : "neg";
         return `
-          <div class="driver-row" title="${item.name} ${fmtPct(item.stock_pct)} 贡献 ${fmtPct(contribution)}">
-            <div class="driver-name">${item.name}</div>
+          <div class="driver-row" title="${escapeHtml(item.name)} ${escapeHtml(fmtPct(item.stock_pct))} 贡献 ${escapeHtml(fmtPct(contribution))}">
+            <div class="driver-name">${escapeHtml(item.name)}</div>
             <div class="driver-track">
               <span class="driver-fill ${cls}" style="left:${left}%;width:${width}%"></span>
             </div>
-            <div class="driver-value">${fmtPct(contribution)}</div>
+            <div class="driver-value">${escapeHtml(fmtPct(contribution))}</div>
           </div>
         `;
       })
@@ -447,6 +552,8 @@ function renderResult(data) {
   ratioValue.textContent = fmtPct(decision.ratio_pct, 0);
   amountValue.className = activeRatio ? `metric-${modeClass}` : "";
   ratioValue.className = activeRatio ? `metric-${modeClass}` : "";
+  byId("dailyValue").textContent = fmtPct(decision.estimated_fund_pct);
+  byId("dailyValue").style.color = pctColor(decision.estimated_fund_pct);
   byId("returnValue").textContent = fmtPct(decision.estimated_position_return_pct);
   byId("returnValue").style.color = pctColor(decision.estimated_position_return_pct);
   byId("reasonText").textContent = decision.reason || "";
@@ -460,6 +567,190 @@ function renderResult(data) {
   renderDrivers(decision, details);
 }
 
+function switchTab(targetId) {
+  document.querySelectorAll(".tab-button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.tab === targetId);
+  });
+  document.querySelectorAll(".tab-page").forEach((page) => {
+    page.classList.toggle("active", page.id === targetId);
+  });
+  syncStatusPill();
+}
+
+document.querySelectorAll(".tab-button").forEach((button) => {
+  button.addEventListener("click", () => switchTab(button.dataset.tab));
+});
+
+function purchasePayload() {
+  const data = new FormData(purchaseForm);
+  return {
+    fundCode: String(data.get("fundCode") || "").trim(),
+    fundName: String(data.get("fundName") || "").trim(),
+    lastNav: numberOrNull(data.get("lastNav")),
+  };
+}
+
+function renderPurchaseLoading() {
+  byId("purchaseEmpty").classList.add("hidden");
+  byId("purchaseResult").classList.remove("hidden");
+  byId("purchaseResult").innerHTML = `
+    <div class="loading-card">
+      <div class="loading-head">
+        <div class="skeleton loading-title"></div>
+        <div class="skeleton loading-pill"></div>
+      </div>
+      <div class="loading-metrics">
+        <div class="skeleton loading-metric"></div>
+        <div class="skeleton loading-metric"></div>
+        <div class="skeleton loading-metric"></div>
+      </div>
+      <div class="skeleton loading-line"></div>
+    </div>
+  `;
+  byId("purchaseMarket").innerHTML = `<div class="loading-chart"><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div></div>`;
+  byId("purchaseHoldings").innerHTML = `<div class="loading-chart"><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div></div>`;
+  byId("purchaseNews").innerHTML = "";
+  byId("purchaseLongTerm").innerHTML = `<div class="loading-chart"><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div></div>`;
+  byId("purchaseMarketStamp").textContent = "-";
+  byId("purchaseLongBadge").textContent = "-";
+  byId("purchaseReport").textContent = "-";
+}
+
+function restorePurchaseTemplate() {
+  byId("purchaseResult").innerHTML = `
+    <div class="result-head">
+      <div>
+        <p class="eyebrow" id="purchaseMeta">基金</p>
+        <h2 id="purchaseVerdict">观察</h2>
+      </div>
+      <div class="result-actions">
+        <button class="ghost" id="copyPurchaseBtn" type="button">复制结论</button>
+        <span class="action-badge watch" id="purchaseScore">0</span>
+      </div>
+    </div>
+    <div class="metric-row">
+      <article>
+        <span>预估日涨跌幅</span>
+        <strong id="purchaseDaily">-</strong>
+      </article>
+      <article>
+        <span>预估净值</span>
+        <strong id="purchaseNav">-</strong>
+      </article>
+      <article>
+        <span>置信度</span>
+        <strong id="purchaseConfidence">-</strong>
+      </article>
+      <article>
+        <span>持仓覆盖</span>
+        <strong id="purchaseCoverage">-</strong>
+      </article>
+    </div>
+    <p class="reason" id="purchaseReason"></p>
+    <div class="diagnostic-row" id="purchaseThemes"></div>
+  `;
+  byId("copyPurchaseBtn").addEventListener("click", copyPurchaseResult);
+}
+
+function renderMarketList(analysis) {
+  const marketRows = (analysis.market || []).map((item) => ({
+    label: item.name,
+    value: item.pct,
+    source: "A股",
+  }));
+  const usRows = (analysis.usProxies || []).map((item) => ({
+    label: item.symbol,
+    value: item.pct,
+    source: "美股/代理",
+  }));
+  const rows = [...marketRows, ...usRows];
+  byId("purchaseMarket").innerHTML = rows.length
+    ? rows
+        .map(
+          (item) => `
+          <div class="market-row">
+            <span>${escapeHtml(item.label)}</span>
+            <b style="color:${pctColor(item.value)}">${escapeHtml(fmtPct(item.value))}</b>
+            <em>${escapeHtml(item.source)}</em>
+          </div>
+        `,
+        )
+        .join("")
+    : `<p class="reason">未取到大盘或美股代理行情。</p>`;
+  byId("purchaseMarketStamp").textContent = analysis.checkedAt || "-";
+}
+
+function renderPurchaseHoldings(analysis) {
+  const holdings = (analysis.holdings || []).slice(0, 8);
+  const maxAbs = Math.max(0.1, ...holdings.map((item) => Math.abs(Number(item.contribution_pct || 0))));
+  byId("purchaseHoldings").innerHTML = holdings.length
+    ? holdings
+        .map((item) => {
+          const contribution = Number(item.contribution_pct || 0);
+          const width = Math.max(3, (Math.abs(contribution) / maxAbs) * 50);
+          const left = contribution >= 0 ? 50 : 50 - width;
+          const cls = contribution >= 0 ? "pos" : "neg";
+          return `
+            <div class="driver-row" title="${escapeHtml(item.name)} ${escapeHtml(fmtPct(item.stock_pct))} 贡献 ${escapeHtml(fmtPct(contribution))}">
+              <div class="driver-name">${escapeHtml(item.name)}</div>
+              <div class="driver-track">
+                <span class="driver-fill ${cls}" style="left:${left}%;width:${width}%"></span>
+              </div>
+              <div class="driver-value">${escapeHtml(fmtPct(contribution))}</div>
+            </div>
+          `;
+        })
+        .join("")
+    : `<p class="reason">暂无持仓贡献明细。</p>`;
+  byId("purchaseReport").textContent = analysis.reportDate ? `披露 ${analysis.reportDate}` : "-";
+}
+
+function renderPurchaseNews(analysis) {
+  const news = analysis.news || [];
+  byId("purchaseNews").innerHTML = news.length
+    ? news
+        .map(
+          (item) => `
+          <article class="news-item">
+            <div>
+              <strong>${escapeHtml(item.title)}</strong>
+              <p>${escapeHtml(item.summary || item.date || "新闻摘要暂缺")}</p>
+            </div>
+            ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">查看</a>` : ""}
+          </article>
+        `,
+        )
+        .join("")
+    : `<p class="driver-copy">最近新闻源暂不可用，当前结论主要来自持仓、A股大盘和美股代理行情。</p>`;
+}
+
+function renderPurchaseAnalysis(data) {
+  const analysis = data.analysis;
+  lastPurchaseResult = data;
+  restorePurchaseTemplate();
+  byId("purchaseEmpty").classList.add("hidden");
+  byId("purchaseResult").classList.remove("hidden");
+  const scoreClass = analysis.score >= 68 ? "buy" : analysis.score >= 52 ? "watch" : "sell";
+  byId("purchaseMeta").textContent = `${analysis.fundCode} ${analysis.fundName || ""}`.trim();
+  byId("purchaseVerdict").textContent = analysis.verdict || "观察";
+  byId("purchaseScore").textContent = `${analysis.score || 0}分`;
+  byId("purchaseScore").className = `action-badge ${scoreClass}`;
+  byId("purchaseDaily").textContent = fmtPct(analysis.estimatedDailyPct);
+  byId("purchaseDaily").style.color = pctColor(analysis.estimatedDailyPct);
+  byId("purchaseNav").textContent = fmtNumber(analysis.estimatedNav);
+  byId("purchaseConfidence").textContent = analysis.confidence || "-";
+  byId("purchaseCoverage").textContent = analysis.coveragePct ? `${Number(analysis.coveragePct).toFixed(1)}%` : "-";
+  byId("purchaseReason").textContent = analysis.reason || "";
+  byId("purchaseThemes").innerHTML = (analysis.themes || []).length
+    ? analysis.themes.map((theme) => `<span>${escapeHtml(theme)}</span>`).join("")
+    : `<span>主题不足</span>`;
+  byId("purchaseLongTerm").textContent = `${analysis.longTerm || ""} ${analysis.notes || ""}`.trim();
+  byId("purchaseLongBadge").textContent = analysis.verdict || "-";
+  renderMarketList(analysis);
+  renderPurchaseHoldings(analysis);
+  renderPurchaseNews(analysis);
+}
+
 document.querySelector("#sampleSelect").addEventListener("change", (event) => {
   fillSample(event.target.value);
 });
@@ -471,26 +762,98 @@ byId("copyResultBtn").addEventListener("click", copyLastResult);
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const submit = form.querySelector("button[type='submit']");
+  if (analyzeController) analyzeController.abort();
+  const controller = new AbortController();
+  analyzeController = controller;
   submit.disabled = true;
+  analyzeLoading = true;
   setStatus("分析中", "busy");
   renderLoadingState();
+  const strategyPayload = formPayload();
+  analyzeFundInfo = { code: strategyPayload.fundCode, name: strategyPayload.fundName };
+  setFundTip(strategyPayload.fundCode, strategyPayload.fundName);
   try {
     const response = await fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(formPayload()),
+      body: JSON.stringify(strategyPayload),
+      signal: controller.signal,
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "分析失败");
     renderResult(data);
-    setStatus("完成");
+    analyzeLoading = false;
+    syncStatusPill();
   } catch (error) {
+    if (error.name === "AbortError") {
+      analyzeLoading = false;
+      setStatus("已取消", "error");
+      return;
+    }
     resultStack.classList.remove("is-loading");
+    analyzeLoading = false;
     setStatus("失败", "error");
-    emptyState.classList.remove("hidden");
     resultView.classList.add("hidden");
-    emptyState.innerHTML = `<p>${error.message}</p>`;
+    emptyState.classList.remove("hidden");
+    byId("signalChart").innerHTML = "";
+    byId("returnGauge").innerHTML = "";
+    byId("driverBars").innerHTML = "";
+    byId("driverCopy").textContent = "";
+    byId("signalSource").textContent = "";
+    byId("confidenceText").textContent = "";
+    byId("coverageText").textContent = "";
+    showErrorInState(emptyState, error.message || "分析失败");
   } finally {
+    if (analyzeController === controller) analyzeController = null;
+    submit.disabled = false;
+  }
+});
+
+purchaseForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submit = purchaseForm.querySelector("button[type='submit']");
+  if (purchaseController) purchaseController.abort();
+  const controller = new AbortController();
+  purchaseController = controller;
+  submit.disabled = true;
+  purchaseLoading = true;
+  setStatus("分析中", "busy");
+  renderPurchaseLoading();
+  const purchasePayloadData = purchasePayload();
+  purchaseFundInfo = { code: purchasePayloadData.fundCode, name: purchasePayloadData.fundName };
+  setFundTip(purchasePayloadData.fundCode, purchasePayloadData.fundName);
+  try {
+    const response = await fetch("/api/purchase-analysis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(purchasePayloadData),
+      signal: controller.signal,
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "分析失败");
+    renderPurchaseAnalysis(data);
+    purchaseLoading = false;
+    syncStatusPill();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      purchaseLoading = false;
+      setStatus("已取消", "error");
+      return;
+    }
+    purchaseLoading = false;
+    setStatus("失败", "error");
+    byId("purchaseResult").classList.add("hidden");
+    byId("purchaseEmpty").classList.remove("hidden");
+    byId("purchaseMarket").innerHTML = "";
+    byId("purchaseHoldings").innerHTML = "";
+    byId("purchaseNews").innerHTML = "";
+    byId("purchaseLongTerm").textContent = "";
+    byId("purchaseMarketStamp").textContent = "-";
+    byId("purchaseLongBadge").textContent = "-";
+    byId("purchaseReport").textContent = "-";
+    showErrorInState(purchaseEmpty, error.message || "分析失败");
+  } finally {
+    if (purchaseController === controller) purchaseController = null;
     submit.disabled = false;
   }
 });

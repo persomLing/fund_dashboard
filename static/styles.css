@@ -23,8 +23,7 @@ body {
   min-height: 100vh;
   margin: 0;
   color: var(--text);
-  background:
-    linear-gradient(180deg, #fbfcfd 0%, var(--bg) 48%, #eef2f6 100%);
+  background: linear-gradient(180deg, #fbfcfd 0%, var(--bg) 48%, #eef2f6 100%);
 }
 
 button,
@@ -45,6 +44,40 @@ select {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.tabbar {
+  display: inline-flex;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(24, 42, 70, 0.05);
+}
+
+.tab-button {
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 18px;
+  color: #41546b;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tab-button.active {
+  color: #fff;
+  background: #1f6fe5;
+}
+
+.tab-page {
+  display: none;
+}
+
+.tab-page.active {
+  display: block;
 }
 
 .eyebrow {
@@ -82,7 +115,34 @@ h2 {
   background: var(--soft);
   font-size: 13px;
   white-space: nowrap;
-  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+  transition:
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.status-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fund-tip {
+  color: #5f6e7d;
+  font-size: 13px;
+  white-space: nowrap;
+  animation: fadeTipIn 240ms ease both;
+}
+
+@keyframes fadeTipIn {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .server-pill.busy {
@@ -165,7 +225,10 @@ select {
   color: var(--text);
   background: #fbfdff;
   outline: none;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
 }
 
 input:focus,
@@ -181,6 +244,10 @@ select:focus {
   gap: 10px;
 }
 
+.button-row.single {
+  grid-template-columns: 1fr;
+}
+
 .primary,
 .secondary,
 .danger,
@@ -192,7 +259,10 @@ select:focus {
   border-radius: 14px;
   padding: 0 16px;
   cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .button-row button span {
@@ -270,7 +340,10 @@ select:focus {
 }
 
 .result-stack.is-loading .panel {
-  transition: transform 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease,
+    box-shadow 180ms ease;
 }
 
 .result-stack.is-loading .panel {
@@ -378,7 +451,9 @@ select:focus {
   align-content: center;
   gap: 12px;
   color: var(--muted);
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
 .pulse-dot {
@@ -451,7 +526,7 @@ select:focus {
 
 .metric-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -586,7 +661,10 @@ svg {
   font-weight: 500;
   background: #fbfdff;
   cursor: pointer;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
 }
 
 .custom-select-text {
@@ -634,7 +712,9 @@ svg {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
-  transition: opacity 160ms ease, transform 160ms ease;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
 }
 
 .custom-select.open .custom-select-menu {
@@ -704,7 +784,9 @@ svg {
   bottom: 0;
   left: 50%;
   border-radius: 999px;
-  transition: width 280ms ease, left 280ms ease;
+  transition:
+    width 280ms ease,
+    left 280ms ease;
 }
 
 .driver-fill.pos {
@@ -719,6 +801,74 @@ svg {
   text-align: right;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.market-list,
+.news-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.market-row,
+.news-item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: #fbfcfe;
+}
+
+.market-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.market-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #344256;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-row b {
+  font-size: 14px;
+}
+
+.market-row em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.news-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.news-item strong {
+  display: block;
+  color: #26364a;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.news-item p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.news-item a {
+  color: #1f6fe5;
+  font-size: 13px;
+  text-decoration: none;
   white-space: nowrap;
 }
 

@@ -13,167 +13,283 @@
           <p class="eyebrow">fund-rebalance-decision</p>
           <h1>基金策略面板</h1>
         </div>
-        <div class="server-pill" id="statusPill">就绪</div>
+        <div class="status-area">
+          <div class="server-pill" id="statusPill">就绪</div>
+          <span class="fund-tip hidden" id="fundTip"></span>
+        </div>
       </header>
 
-      <section class="layout">
-        <form class="panel input-panel" id="fundForm">
-          <div class="panel-head">
-            <h2>输入</h2>
-            <select id="sampleSelect" aria-label="快速填入">
-              <option value="">快速填入</option>
-              <option value="004241">中欧时代先锋 C</option>
-              <option value="012650">博时半导体 A</option>
-              <option value="018815">方正富邦核心优势 A</option>
-            </select>
-          </div>
+      <nav class="tabbar" aria-label="页面切换">
+        <button class="tab-button active" type="button" data-tab="strategyPage">持仓策略</button>
+        <button class="tab-button" type="button" data-tab="purchasePage">购入分析</button>
+      </nav>
 
-          <div class="grid two">
-            <label>
-              <span>基金代码</span>
-              <input name="fundCode" required maxlength="6" inputmode="numeric" placeholder="004241" />
-            </label>
-            <label>
-              <span>基金名称</span>
-              <input name="fundName" placeholder="可选" />
-            </label>
-          </div>
+      <section class="tab-page active" id="strategyPage">
+        <section class="layout">
+          <form class="panel input-panel" id="fundForm">
+            <div class="panel-head">
+              <h2>输入</h2>
+              <select id="sampleSelect" aria-label="快速填入">
+                <option value="">快速填入</option>
+                <option value="004241">中欧时代先锋 C</option>
+                <option value="012650">博时半导体 A</option>
+                <option value="018815">方正富邦核心优势 A</option>
+              </select>
+            </div>
 
-          <div class="grid two">
-            <label>
-              <span>持有金额</span>
-              <input name="holdingValue" required inputmode="decimal" placeholder="2019.49" />
-            </label>
-            <label>
-              <span>持仓成本价</span>
-              <input name="costNav" inputmode="decimal" placeholder="2.0832" />
-            </label>
-          </div>
+            <div class="grid two">
+              <label>
+                <span>基金代码</span>
+                <input name="fundCode" required maxlength="6" inputmode="numeric" placeholder="004241" />
+              </label>
+              <label>
+                <span>基金名称</span>
+                <input name="fundName" placeholder="可选" />
+              </label>
+            </div>
 
-          <div class="grid two">
+            <div class="grid two">
+              <label>
+                <span>持有金额</span>
+                <input name="holdingValue" required inputmode="decimal" placeholder="2019.49" />
+              </label>
+              <label>
+                <span>持仓成本价</span>
+                <input name="costNav" inputmode="decimal" placeholder="2.0832" />
+              </label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>基金净值</span>
+                <input name="lastNav" inputmode="decimal" placeholder="2.0452" />
+              </label>
+              <label>
+                <span>持有收益率 %</span>
+                <input name="returnRatePct" inputmode="decimal" placeholder="-1.82" />
+              </label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>平台日涨跌 %</span>
+                <input name="navSignalPct" inputmode="decimal" placeholder="可选，如 -1.01" />
+              </label>
+              <label>
+                <span>首档触发线</span>
+                <select name="firstTriggerPct">
+                  <option value="3.5">-3.5%</option>
+                  <option value="4">-4%</option>
+                  <option value="5">-5%</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>模式</span>
+                <select name="mode">
+                  <option value="auto">自动</option>
+                  <option value="buy">只看补仓</option>
+                  <option value="sell">只看减仓</option>
+                </select>
+              </label>
+              <label>
+                <span>时间门槛</span>
+                <select name="ignoreTimeGate">
+                  <option value="true">估算模式</option>
+                  <option value="false">严格 14:50</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="button-row">
+              <button class="secondary" id="saveFundBtn" type="button">
+                <span>保存信息</span>
+              </button>
+              <button class="danger" id="deleteFundBtn" type="button">
+                <span>删除基金</span>
+              </button>
+              <button class="primary" type="submit">
+                <span>执行分析</span>
+                <span class="arrow">→</span>
+              </button>
+            </div>
+          </form>
+
+          <section class="result-stack">
+            <section class="panel hero-panel">
+              <div class="empty-state" id="emptyState">
+                <div class="pulse-dot"></div>
+                <p>输入基金信息后生成结果</p>
+              </div>
+              <div class="result-view hidden" id="resultView">
+                <div class="result-head">
+                  <div>
+                    <p class="eyebrow" id="fundMeta">基金</p>
+                    <h2 id="actionTitle">观察</h2>
+                  </div>
+                  <div class="result-actions">
+                    <button class="ghost" id="copyResultBtn" type="button">复制结论</button>
+                    <span class="action-badge" id="actionBadge">watch</span>
+                  </div>
+                </div>
+                <div class="metric-row">
+                  <article>
+                    <span id="amountLabel">建议金额</span>
+                    <strong id="amountValue">0</strong>
+                  </article>
+                  <article>
+                    <span id="ratioLabel">建议比例</span>
+                    <strong id="ratioValue">0%</strong>
+                  </article>
+                  <article>
+                    <span>预估日涨跌幅</span>
+                    <strong id="dailyValue">0%</strong>
+                  </article>
+                  <article>
+                    <span>预估持有收益</span>
+                    <strong id="returnValue">0%</strong>
+                  </article>
+                </div>
+                <p class="reason" id="reasonText"></p>
+                <div class="diagnostic-row" id="diagnosticRow">
+                  <span>决策信号 <b id="diagDaily">-</b></span>
+                  <span>持仓估算 <b id="diagHolding">-</b></span>
+                  <span>模型差距 <b id="diagGap">-</b></span>
+                  <span>覆盖 <b id="diagCoverage">-</b></span>
+                </div>
+              </div>
+            </section>
+
+            <section class="dashboard-grid">
+              <article class="panel chart-panel">
+                <div class="panel-head">
+                  <h2>涨跌信号</h2>
+                  <span id="signalSource">-</span>
+                </div>
+                <div id="signalChart" class="svg-box"></div>
+              </article>
+
+              <article class="panel chart-panel">
+                <div class="panel-head">
+                  <h2>收益位置</h2>
+                  <span id="confidenceText">-</span>
+                </div>
+                <div id="returnGauge" class="svg-box compact"></div>
+              </article>
+            </section>
+
+            <section class="panel drivers-panel">
+              <div class="panel-head">
+                <h2>持仓贡献</h2>
+                <span id="coverageText">-</span>
+              </div>
+              <div id="driverBars" class="drivers"></div>
+              <p class="driver-copy" id="driverCopy"></p>
+            </section>
+          </section>
+        </section>
+      </section>
+
+      <section class="tab-page" id="purchasePage">
+        <section class="layout">
+          <form class="panel input-panel" id="purchaseForm">
+            <div class="panel-head">
+              <h2>购入分析</h2>
+              <span>实时估算</span>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>基金代码</span>
+                <input name="fundCode" required maxlength="6" inputmode="numeric" placeholder="004241" />
+              </label>
+              <label>
+                <span>基金名称</span>
+                <input name="fundName" placeholder="可选" />
+              </label>
+            </div>
+
             <label>
               <span>基金净值</span>
-              <input name="lastNav" inputmode="decimal" placeholder="2.0452" />
+              <input name="lastNav" inputmode="decimal" placeholder="可选；不填则自动获取最近净值" />
             </label>
-            <label>
-              <span>持有收益率 %</span>
-              <input name="returnRatePct" inputmode="decimal" placeholder="-1.82" />
-            </label>
-          </div>
 
-          <div class="grid two">
-            <label>
-              <span>平台日涨跌 %</span>
-              <input name="navSignalPct" inputmode="decimal" placeholder="可选，如 -1.01" />
-            </label>
-            <label>
-              <span>首档触发线</span>
-              <select name="firstTriggerPct">
-                <option value="3.5">-3.5%</option>
-                <option value="4">-4%</option>
-                <option value="5">-5%</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="grid two">
-            <label>
-              <span>模式</span>
-              <select name="mode">
-                <option value="auto">自动</option>
-                <option value="buy">只看补仓</option>
-                <option value="sell">只看减仓</option>
-              </select>
-            </label>
-            <label>
-              <span>时间门槛</span>
-              <select name="ignoreTimeGate">
-                <option value="true">估算模式</option>
-                <option value="false">严格 14:50</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="button-row">
-            <button class="secondary" id="saveFundBtn" type="button">
-              <span>保存信息</span>
-            </button>
-            <button class="danger" id="deleteFundBtn" type="button">
-              <span>删除基金</span>
-            </button>
-            <button class="primary" type="submit">
-              <span>执行分析</span>
-              <span class="arrow">→</span>
-            </button>
-          </div>
-        </form>
-
-        <section class="result-stack">
-          <section class="panel hero-panel">
-            <div class="empty-state" id="emptyState">
-              <div class="pulse-dot"></div>
-              <p>输入基金信息后生成结果</p>
+            <div class="button-row single">
+              <button class="primary" type="submit">
+                <span>分析能否购入</span>
+                <span class="arrow">→</span>
+              </button>
             </div>
-            <div class="result-view hidden" id="resultView">
-              <div class="result-head">
-                <div>
-                  <p class="eyebrow" id="fundMeta">基金</p>
-                  <h2 id="actionTitle">观察</h2>
+          </form>
+
+          <section class="result-stack">
+            <section class="panel hero-panel">
+              <div class="empty-state" id="purchaseEmpty">
+                <div class="pulse-dot"></div>
+                <p>输入基金代码后分析是否适合购入</p>
+              </div>
+              <div class="result-view hidden" id="purchaseResult">
+                <div class="result-head">
+                  <div>
+                    <p class="eyebrow" id="purchaseMeta">基金</p>
+                    <h2 id="purchaseVerdict">观察</h2>
+                  </div>
+                  <div class="result-actions">
+                    <button class="ghost" id="copyPurchaseBtn" type="button">复制结论</button>
+                    <span class="action-badge watch" id="purchaseScore">0</span>
+                  </div>
                 </div>
-                <div class="result-actions">
-                  <button class="ghost" id="copyResultBtn" type="button">复制结论</button>
-                  <span class="action-badge" id="actionBadge">watch</span>
+                <div class="metric-row">
+                  <article>
+                    <span>预估日涨跌幅</span>
+                    <strong id="purchaseDaily">-</strong>
+                  </article>
+                  <article>
+                    <span>预估净值</span>
+                    <strong id="purchaseNav">-</strong>
+                  </article>
+                  <article>
+                    <span>置信度</span>
+                    <strong id="purchaseConfidence">-</strong>
+                  </article>
+                  <article>
+                    <span>持仓覆盖</span>
+                    <strong id="purchaseCoverage">-</strong>
+                  </article>
                 </div>
+                <p class="reason" id="purchaseReason"></p>
+                <div class="diagnostic-row" id="purchaseThemes"></div>
               </div>
-              <div class="metric-row">
-                <article>
-                  <span id="amountLabel">建议金额</span>
-                  <strong id="amountValue">0</strong>
-                </article>
-                <article>
-                  <span id="ratioLabel">建议比例</span>
-                  <strong id="ratioValue">0%</strong>
-                </article>
-                <article>
-                  <span>预估持有收益</span>
-                  <strong id="returnValue">0%</strong>
-                </article>
-              </div>
-              <p class="reason" id="reasonText"></p>
-              <div class="diagnostic-row" id="diagnosticRow">
-                <span>决策信号 <b id="diagDaily">-</b></span>
-                <span>持仓估算 <b id="diagHolding">-</b></span>
-                <span>模型差距 <b id="diagGap">-</b></span>
-                <span>覆盖 <b id="diagCoverage">-</b></span>
-              </div>
-            </div>
-          </section>
+            </section>
 
-          <section class="dashboard-grid">
-            <article class="panel chart-panel">
+            <section class="dashboard-grid">
+              <article class="panel chart-panel">
+                <div class="panel-head">
+                  <h2>大盘与美股影响</h2>
+                  <span id="purchaseMarketStamp">-</span>
+                </div>
+                <div id="purchaseMarket" class="market-list"></div>
+              </article>
+
+              <article class="panel chart-panel">
+                <div class="panel-head">
+                  <h2>长期判断</h2>
+                  <span id="purchaseLongBadge">-</span>
+                </div>
+                <p class="driver-copy" id="purchaseLongTerm"></p>
+              </article>
+            </section>
+
+            <section class="panel drivers-panel">
               <div class="panel-head">
-                <h2>涨跌信号</h2>
-                <span id="signalSource">-</span>
+                <h2>重仓与新闻</h2>
+                <span id="purchaseReport">-</span>
               </div>
-              <div id="signalChart" class="svg-box"></div>
-            </article>
-
-            <article class="panel chart-panel">
-              <div class="panel-head">
-                <h2>收益位置</h2>
-                <span id="confidenceText">-</span>
-              </div>
-              <div id="returnGauge" class="svg-box compact"></div>
-            </article>
-          </section>
-
-          <section class="panel drivers-panel">
-            <div class="panel-head">
-              <h2>持仓贡献</h2>
-              <span id="coverageText">-</span>
-            </div>
-            <div id="driverBars" class="drivers"></div>
-            <p class="driver-copy" id="driverCopy"></p>
+              <div id="purchaseHoldings" class="drivers"></div>
+              <div id="purchaseNews" class="news-list"></div>
+            </section>
           </section>
         </section>
       </section>
