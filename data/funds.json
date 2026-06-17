@@ -25,5 +25,23 @@
     "lastNav": "2.3478",
     "returnRatePct": "4.36",
     "navSignalPct": "2.27"
+  },
+  "002207": {
+    "fundCode": "002207",
+    "fundName": "前海开源金银珠宝混合C",
+    "holdingValue": "2315.50",
+    "costNav": "2.6675",
+    "lastNav": "2.5540",
+    "returnRatePct": "-4.26",
+    "navSignalPct": "-0.97"
+  },
+  "016370": {
+    "fundCode": "016370",
+    "fundName": "信澳业绩驱动混合A",
+    "holdingValue": "71.13",
+    "costNav": "3.0824",
+    "lastNav": "3.4886",
+    "returnRatePct": "13.18",
+    "navSignalPct": "3.93"
   }
 }
