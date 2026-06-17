@@ -1,0 +1,29 @@
+{
+  "004241": {
+    "fundCode": "004241",
+    "fundName": "中欧时代先锋股票C",
+    "holdingValue": "2019.49",
+    "costNav": "2.0832",
+    "lastNav": "2.0452",
+    "returnRatePct": "-1.82",
+    "navSignalPct": "-1.01"
+  },
+  "012650": {
+    "fundCode": "012650",
+    "fundName": "博时半导体主题混合A",
+    "holdingValue": "525.81",
+    "costNav": "1.9157",
+    "lastNav": "1.9371",
+    "returnRatePct": "1.12",
+    "navSignalPct": "-0.27"
+  },
+  "018815": {
+    "fundCode": "018815",
+    "fundName": "方正富邦核心优势混合A",
+    "holdingValue": "521.82",
+    "costNav": "2.2496",
+    "lastNav": "2.3478",
+    "returnRatePct": "4.36",
+    "navSignalPct": "2.27"
+  }
+}

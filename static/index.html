@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>基金策略面板</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">fund-rebalance-decision</p>
+          <h1>基金策略面板</h1>
+        </div>
+        <div class="server-pill" id="statusPill">就绪</div>
+      </header>
+
+      <section class="layout">
+        <form class="panel input-panel" id="fundForm">
+          <div class="panel-head">
+            <h2>输入</h2>
+            <select id="sampleSelect" aria-label="快速填入">
+              <option value="">快速填入</option>
+              <option value="004241">中欧时代先锋 C</option>
+              <option value="012650">博时半导体 A</option>
+              <option value="018815">方正富邦核心优势 A</option>
+            </select>
+          </div>
+
+          <div class="grid two">
+            <label>
+              <span>基金代码</span>
+              <input name="fundCode" required maxlength="6" inputmode="numeric" placeholder="004241" />
+            </label>
+            <label>
+              <span>基金名称</span>
+              <input name="fundName" placeholder="可选" />
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label>
+              <span>持有金额</span>
+              <input name="holdingValue" required inputmode="decimal" placeholder="2019.49" />
+            </label>
+            <label>
+              <span>持仓成本价</span>
+              <input name="costNav" inputmode="decimal" placeholder="2.0832" />
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label>
+              <span>基金净值</span>
+              <input name="lastNav" inputmode="decimal" placeholder="2.0452" />
+            </label>
+            <label>
+              <span>持有收益率 %</span>
+              <input name="returnRatePct" inputmode="decimal" placeholder="-1.82" />
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label>
+              <span>平台日涨跌 %</span>
+              <input name="navSignalPct" inputmode="decimal" placeholder="可选，如 -1.01" />
+            </label>
+            <label>
+              <span>首档触发线</span>
+              <select name="firstTriggerPct">
+                <option value="3.5">-3.5%</option>
+                <option value="4">-4%</option>
+                <option value="5">-5%</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid two">
+            <label>
+              <span>模式</span>
+              <select name="mode">
+                <option value="auto">自动</option>
+                <option value="buy">只看补仓</option>
+                <option value="sell">只看减仓</option>
+              </select>
+            </label>
+            <label>
+              <span>时间门槛</span>
+              <select name="ignoreTimeGate">
+                <option value="true">估算模式</option>
+                <option value="false">严格 14:50</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="button-row">
+            <button class="secondary" id="saveFundBtn" type="button">
+              <span>保存信息</span>
+            </button>
+            <button class="danger" id="deleteFundBtn" type="button">
+              <span>删除基金</span>
+            </button>
+            <button class="primary" type="submit">
+              <span>执行分析</span>
+              <span class="arrow">→</span>
+            </button>
+          </div>
+        </form>
+
+        <section class="result-stack">
+          <section class="panel hero-panel">
+            <div class="empty-state" id="emptyState">
+              <div class="pulse-dot"></div>
+              <p>输入基金信息后生成结果</p>
+            </div>
+            <div class="result-view hidden" id="resultView">
+              <div class="result-head">
+                <div>
+                  <p class="eyebrow" id="fundMeta">基金</p>
+                  <h2 id="actionTitle">观察</h2>
+                </div>
+                <div class="result-actions">
+                  <button class="ghost" id="copyResultBtn" type="button">复制结论</button>
+                  <span class="action-badge" id="actionBadge">watch</span>
+                </div>
+              </div>
+              <div class="metric-row">
+                <article>
+                  <span id="amountLabel">建议金额</span>
+                  <strong id="amountValue">0</strong>
+                </article>
+                <article>
+                  <span id="ratioLabel">建议比例</span>
+                  <strong id="ratioValue">0%</strong>
+                </article>
+                <article>
+                  <span>预估持有收益</span>
+                  <strong id="returnValue">0%</strong>
+                </article>
+              </div>
+              <p class="reason" id="reasonText"></p>
+              <div class="diagnostic-row" id="diagnosticRow">
+                <span>决策信号 <b id="diagDaily">-</b></span>
+                <span>持仓估算 <b id="diagHolding">-</b></span>
+                <span>模型差距 <b id="diagGap">-</b></span>
+                <span>覆盖 <b id="diagCoverage">-</b></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="panel chart-panel">
+              <div class="panel-head">
+                <h2>涨跌信号</h2>
+                <span id="signalSource">-</span>
+              </div>
+              <div id="signalChart" class="svg-box"></div>
+            </article>
+
+            <article class="panel chart-panel">
+              <div class="panel-head">
+                <h2>收益位置</h2>
+                <span id="confidenceText">-</span>
+              </div>
+              <div id="returnGauge" class="svg-box compact"></div>
+            </article>
+          </section>
+
+          <section class="panel drivers-panel">
+            <div class="panel-head">
+              <h2>持仓贡献</h2>
+              <span id="coverageText">-</span>
+            </div>
+            <div id="driverBars" class="drivers"></div>
+            <p class="driver-copy" id="driverCopy"></p>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
