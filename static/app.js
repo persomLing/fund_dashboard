@@ -53,6 +53,13 @@ function pctColor(value) {
   return "#7d8794";
 }
 
+function signalSourceLabel(value) {
+  if (value === "nav_signal") return "手工/截图估值";
+  if (value === "fund_platform") return "基金平台估值";
+  if (value === "holdings") return "披露持仓估算";
+  return value || "-";
+}
+
 function setStatus(text, type = "") {
   statusPill.textContent = text;
   statusPill.className = `server-pill ${type}`;
@@ -143,10 +150,19 @@ function renderLoadingState() {
       <div class="skeleton loading-bar"></div>
     </div>
   `;
+  byId("perspectiveList").innerHTML = `
+    <div class="loading-chart">
+      <div class="skeleton loading-bar"></div>
+      <div class="skeleton loading-bar"></div>
+      <div class="skeleton loading-bar"></div>
+    </div>
+  `;
+  byId("dataSourceList").innerHTML = "";
   byId("driverCopy").textContent = "";
   byId("signalSource").textContent = "分析中";
   byId("confidenceText").textContent = "分析中";
   byId("coverageText").textContent = "分析中";
+  byId("dataSourceCount").textContent = "分析中";
 }
 
 function restoreResultTemplate() {
@@ -376,8 +392,11 @@ function analysisSummary(decision) {
     `金额：${fmtMoney(decision.amount)} 元，比例：${fmtPct(decision.ratio_pct, 0)}`,
     `持有收益：${fmtPct(decision.estimated_position_return_pct)}`,
     `决策信号：${fmtPct(decision.estimated_fund_pct)}，持仓估算：${fmtPct(decision.holdings_estimated_fund_pct)}`,
+    `基金平台估值：${fmtPct(decision.platform_estimated_fund_pct)}，手工估值：${fmtPct(decision.nav_signal_pct)}`,
     `原因：${decision.reason || "-"}`,
     `持仓驱动：${decision.driver_reason || "-"}`,
+    `多角度：${(decision.analysis_perspectives || []).map((item) => `${item.angle}：${item.interpretation}`).join("；") || "-"}`,
+    `数据源：${(decision.data_sources || []).join("，") || "-"}`,
   ].join("\n");
 }
 
@@ -409,10 +428,13 @@ function purchaseAnalysisSummary(analysis) {
   return [
     `${analysis.fundCode} ${analysis.fundName || ""}`.trim(),
     `结论：${analysis.verdict || "-"}（${analysis.score || 0}分）`,
-    `预估日涨跌幅：${fmtPct(analysis.estimatedDailyPct)}，预估净值：${fmtNumber(analysis.estimatedNav)}`,
+    `主信号：${signalSourceLabel(analysis.signalSource)} ${fmtPct(analysis.estimatedDailyPct)}，预估净值：${fmtNumber(analysis.estimatedNav)}`,
+    `平台估值：${fmtPct(analysis.platformEstimatedDailyPct)}，持仓估算：${fmtPct(analysis.holdingsEstimatedDailyPct)}，差距：${fmtPct(analysis.signalGapPct)}`,
     `置信度：${analysis.confidence || "-"}，持仓覆盖：${analysis.coveragePct ? Number(analysis.coveragePct).toFixed(1) + "%" : "-"}`,
     `原因：${analysis.reason || "-"}`,
     `长期判断：${analysis.longTerm || "-"} ${analysis.notes || ""}`.trim(),
+    `多角度：${(analysis.analysisPerspectives || []).map((item) => `${item.angle}：${item.interpretation}`).join("；") || "-"}`,
+    `数据源：${(analysis.dataSources || []).join("，") || "-"}`,
     `大盘：${market || "-"}`,
     `美股代理：${usProxies || "-"}`,
     `重仓贡献：${holdings || "-"}`,
@@ -441,9 +463,10 @@ async function copyPurchaseResult() {
 
 function renderSignalChart(decision) {
   const rows = [
-    ["决策信号", decision.estimated_fund_pct],
+    ["主信号", decision.estimated_fund_pct],
     ["持仓估算", decision.holdings_estimated_fund_pct],
-    ["平台信号", decision.nav_signal_pct],
+    ["基金平台", decision.platform_estimated_fund_pct],
+    ["手工估值", decision.nav_signal_pct],
   ].filter((row) => row[1] !== null && row[1] !== undefined);
   const maxAbs = Math.max(1, ...rows.map((row) => Math.abs(Number(row[1]))));
   const width = 560;
@@ -470,8 +493,7 @@ function renderSignalChart(decision) {
       ${bars}
     </svg>
   `;
-  const source = decision.signal_source === "nav_signal" ? "平台信号" : "持仓估算";
-  byId("signalSource").textContent = source;
+  byId("signalSource").textContent = signalSourceLabel(decision.signal_source);
 }
 
 function renderReturnGauge(decision) {
@@ -528,6 +550,32 @@ function renderDrivers(decision, details) {
   byId("driverCopy").textContent = decision.driver_reason || "";
 }
 
+function renderPerspectives(decision) {
+  const perspectives = decision.analysis_perspectives || [];
+  byId("perspectiveList").innerHTML = perspectives.length
+    ? perspectives
+        .map(
+          (item) => `
+          <article class="perspective-item">
+            <div>
+              <strong>${escapeHtml(item.angle || "-")}</strong>
+              <span>${escapeHtml(item.source || "-")} · ${escapeHtml(item.confidence || "-")}</span>
+            </div>
+            <b style="color:${pctColor(item.signal_pct)}">${escapeHtml(item.signal_pct === null || item.signal_pct === undefined ? "-" : fmtPct(item.signal_pct))}</b>
+            <p>${escapeHtml(item.interpretation || "")}</p>
+          </article>
+        `,
+        )
+        .join("")
+    : `<p class="driver-copy">暂无多角度解读。</p>`;
+
+  const sources = decision.data_sources || [];
+  byId("dataSourceCount").textContent = sources.length ? `${sources.length} 个数据源` : "无数据源";
+  byId("dataSourceList").innerHTML = sources.length
+    ? sources.map((source) => `<span>${escapeHtml(source)}</span>`).join("")
+    : "";
+}
+
 function renderResult(data) {
   resultStack.classList.remove("is-loading");
   restoreResultTemplate();
@@ -565,6 +613,7 @@ function renderResult(data) {
   renderSignalChart(decision);
   renderReturnGauge(decision);
   renderDrivers(decision, details);
+  renderPerspectives(decision);
 }
 
 function switchTab(targetId) {
@@ -611,9 +660,12 @@ function renderPurchaseLoading() {
   byId("purchaseHoldings").innerHTML = `<div class="loading-chart"><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div></div>`;
   byId("purchaseNews").innerHTML = "";
   byId("purchaseLongTerm").innerHTML = `<div class="loading-chart"><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div></div>`;
+  byId("purchasePerspectives").innerHTML = `<div class="loading-chart"><div class="skeleton loading-bar"></div><div class="skeleton loading-bar"></div></div>`;
+  byId("purchaseSources").innerHTML = "";
   byId("purchaseMarketStamp").textContent = "-";
   byId("purchaseLongBadge").textContent = "-";
   byId("purchaseReport").textContent = "-";
+  byId("purchaseSourceCount").textContent = "分析中";
 }
 
 function restorePurchaseTemplate() {
@@ -648,6 +700,12 @@ function restorePurchaseTemplate() {
     </div>
     <p class="reason" id="purchaseReason"></p>
     <div class="diagnostic-row" id="purchaseThemes"></div>
+    <div class="diagnostic-row">
+      <span>主信号 <b id="purchaseSignalSource">-</b></span>
+      <span>平台估值 <b id="purchasePlatform">-</b></span>
+      <span>持仓估算 <b id="purchaseHoldingSignal">-</b></span>
+      <span>信号差 <b id="purchaseSignalGap">-</b></span>
+    </div>
   `;
   byId("copyPurchaseBtn").addEventListener("click", copyPurchaseResult);
 }
@@ -724,6 +782,31 @@ function renderPurchaseNews(analysis) {
     : `<p class="driver-copy">最近新闻源暂不可用，当前结论主要来自持仓、A股大盘和美股代理行情。</p>`;
 }
 
+function renderPurchasePerspectives(analysis) {
+  const perspectives = analysis.analysisPerspectives || [];
+  byId("purchasePerspectives").innerHTML = perspectives.length
+    ? perspectives
+        .map(
+          (item) => `
+          <article class="perspective-item">
+            <div>
+              <strong>${escapeHtml(item.angle || "-")}</strong>
+              <span>${escapeHtml(item.source || "-")} · ${escapeHtml(item.confidence || "-")}</span>
+            </div>
+            <b style="color:${pctColor(item.signal_pct)}">${escapeHtml(item.signal_pct === null || item.signal_pct === undefined ? "-" : fmtPct(item.signal_pct))}</b>
+            <p>${escapeHtml(item.interpretation || "")}</p>
+          </article>
+        `,
+        )
+        .join("")
+    : `<p class="driver-copy">暂无购入信号拆解。</p>`;
+  const sources = analysis.dataSources || [];
+  byId("purchaseSourceCount").textContent = sources.length ? `${sources.length} 个数据源` : "无数据源";
+  byId("purchaseSources").innerHTML = sources.length
+    ? sources.map((source) => `<span>${escapeHtml(source)}</span>`).join("")
+    : "";
+}
+
 function renderPurchaseAnalysis(data) {
   const analysis = data.analysis;
   lastPurchaseResult = data;
@@ -741,6 +824,10 @@ function renderPurchaseAnalysis(data) {
   byId("purchaseConfidence").textContent = analysis.confidence || "-";
   byId("purchaseCoverage").textContent = analysis.coveragePct ? `${Number(analysis.coveragePct).toFixed(1)}%` : "-";
   byId("purchaseReason").textContent = analysis.reason || "";
+  byId("purchaseSignalSource").textContent = signalSourceLabel(analysis.signalSource);
+  byId("purchasePlatform").textContent = fmtPct(analysis.platformEstimatedDailyPct);
+  byId("purchaseHoldingSignal").textContent = fmtPct(analysis.holdingsEstimatedDailyPct);
+  byId("purchaseSignalGap").textContent = fmtPct(analysis.signalGapPct);
   byId("purchaseThemes").innerHTML = (analysis.themes || []).length
     ? analysis.themes.map((theme) => `<span>${escapeHtml(theme)}</span>`).join("")
     : `<span>主题不足</span>`;
@@ -749,6 +836,7 @@ function renderPurchaseAnalysis(data) {
   renderMarketList(analysis);
   renderPurchaseHoldings(analysis);
   renderPurchaseNews(analysis);
+  renderPurchasePerspectives(analysis);
 }
 
 document.querySelector("#sampleSelect").addEventListener("change", (event) => {
@@ -798,10 +886,13 @@ form.addEventListener("submit", async (event) => {
     byId("signalChart").innerHTML = "";
     byId("returnGauge").innerHTML = "";
     byId("driverBars").innerHTML = "";
+    byId("perspectiveList").innerHTML = "";
+    byId("dataSourceList").innerHTML = "";
     byId("driverCopy").textContent = "";
     byId("signalSource").textContent = "";
     byId("confidenceText").textContent = "";
     byId("coverageText").textContent = "";
+    byId("dataSourceCount").textContent = "-";
     showErrorInState(emptyState, error.message || "分析失败");
   } finally {
     if (analyzeController === controller) analyzeController = null;
@@ -848,9 +939,12 @@ purchaseForm.addEventListener("submit", async (event) => {
     byId("purchaseHoldings").innerHTML = "";
     byId("purchaseNews").innerHTML = "";
     byId("purchaseLongTerm").textContent = "";
+    byId("purchasePerspectives").innerHTML = "";
+    byId("purchaseSources").innerHTML = "";
     byId("purchaseMarketStamp").textContent = "-";
     byId("purchaseLongBadge").textContent = "-";
     byId("purchaseReport").textContent = "-";
+    byId("purchaseSourceCount").textContent = "-";
     showErrorInState(purchaseEmpty, error.message || "分析失败");
   } finally {
     if (purchaseController === controller) purchaseController = null;

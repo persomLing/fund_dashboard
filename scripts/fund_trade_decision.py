@@ -43,6 +43,26 @@ class HoldingModel:
 
 
 @dataclass
+class FundPlatformEstimate:
+    source: str
+    fund_name: str
+    last_nav: float | None
+    last_nav_date: str
+    estimated_nav: float | None
+    estimated_fund_pct: float | None
+    estimated_time: str
+
+
+@dataclass
+class AnalysisPerspective:
+    angle: str
+    signal_pct: float | None
+    confidence: str
+    source: str
+    interpretation: str
+
+
+@dataclass
 class TradeDecision:
     mode: str
     action: str
@@ -58,6 +78,7 @@ class TradeDecision:
     estimated_fund_pct: float | None
     holdings_estimated_fund_pct: float | None
     nav_signal_pct: float | None
+    platform_estimated_fund_pct: float | None
     signal_source: str
     signal_gap_pct: float | None
     coverage_pct: float | None
@@ -65,6 +86,8 @@ class TradeDecision:
     estimated_position_return_pct: float
     confidence: str
     driver_reason: str
+    analysis_perspectives: list[AnalysisPerspective]
+    data_sources: list[str]
     checked_at: str
 
 
@@ -149,7 +172,7 @@ def sina_symbol(code: str) -> str | None:
     return ("sh" if code.startswith(("5", "6", "9")) else "sz") + code
 
 
-def get_latest_fund_nav(fund_code: str) -> tuple[str, float | None, str]:
+def get_fund_platform_estimate(fund_code: str) -> FundPlatformEstimate | None:
     url = f"https://fundgz.1234567.com.cn/js/{fund_code}.js"
     try:
         resp = requests.get(
@@ -160,14 +183,28 @@ def get_latest_fund_nav(fund_code: str) -> tuple[str, float | None, str]:
         resp.raise_for_status()
         match = re.search(r"\{.*\}", resp.text)
         if not match:
-            return "", None, ""
+            return None
         data = json.loads(match.group(0))
-        name = str(data.get("name") or "")
-        nav = to_float(data.get("dwjz")) or to_float(data.get("gsz"))
-        nav_time = str(data.get("jzrq") or data.get("gztime") or "")
-        return name, nav, nav_time
+        return FundPlatformEstimate(
+            source="天天基金/东方财富基金估值接口",
+            fund_name=str(data.get("name") or ""),
+            last_nav=to_float(data.get("dwjz")),
+            last_nav_date=str(data.get("jzrq") or ""),
+            estimated_nav=to_float(data.get("gsz")),
+            estimated_fund_pct=to_float(data.get("gszzl")),
+            estimated_time=str(data.get("gztime") or ""),
+        )
     except Exception:
+        return None
+
+
+def get_latest_fund_nav(fund_code: str) -> tuple[str, float | None, str]:
+    estimate = get_fund_platform_estimate(fund_code)
+    if estimate is None:
         return "", None, ""
+    nav = estimate.last_nav or estimate.estimated_nav
+    nav_time = estimate.last_nav_date or estimate.estimated_time
+    return estimate.fund_name, nav, nav_time
 
 
 def fetch_stock_quotes(codes: list[str]) -> dict[str, float]:
@@ -359,6 +396,197 @@ def driver_reason(model: HoldingModel | None) -> str:
     return f"披露重仓股分化，估算净值约{model.estimated_fund_pct:+.2f}%。拉动：{pos}。拖累：{neg}。"
 
 
+def fetch_market_indices() -> dict[str, float]:
+    indices = {
+        "上证指数": "1.000001",
+        "深证成指": "0.399001",
+        "创业板指": "0.399006",
+        "沪深300": "1.000300",
+    }
+    url = (
+        "https://push2.eastmoney.com/api/qt/ulist.np/get"
+        "?fltt=2&fields=f3,f12,f14&secids=" + ",".join(indices.values())
+    )
+    try:
+        resp = requests.get(
+            url,
+            timeout=6,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"},
+        )
+        resp.raise_for_status()
+        rows = (resp.json().get("data", {}) or {}).get("diff", []) or []
+    except Exception:
+        return {}
+
+    code_to_name = {secid.split(".", 1)[1]: name for name, secid in indices.items()}
+    result: dict[str, float] = {}
+    for row in rows:
+        code = str(row.get("f12", ""))
+        pct = to_float(row.get("f3"))
+        name = code_to_name.get(code)
+        if name and pct is not None:
+            result[name] = pct
+    return result
+
+
+def theme_breakdown(model: HoldingModel | None) -> list[dict[str, float | str]]:
+    if model is None:
+        return []
+    buckets: dict[str, dict[str, float | str]] = {}
+    for h in model.holdings:
+        theme = infer_theme(h.name)
+        bucket = buckets.setdefault(theme, {"theme": theme, "weight_pct": 0.0, "contribution_pct": 0.0})
+        bucket["weight_pct"] = float(bucket["weight_pct"]) + h.weight_pct
+        if h.contribution_pct is not None:
+            bucket["contribution_pct"] = float(bucket["contribution_pct"]) + h.contribution_pct
+    return sorted(buckets.values(), key=lambda item: abs(float(item["contribution_pct"])), reverse=True)
+
+
+def pct_text(value: float | None) -> str:
+    return "无" if value is None else f"{value:+.2f}%"
+
+
+def build_analysis_perspectives(
+    model: HoldingModel | None,
+    platform_estimate: FundPlatformEstimate | None,
+    nav_signal_pct: float | None,
+    daily_pct: float,
+    signal_source: str,
+    signal_gap: float | None,
+    position_return: float,
+    first_trigger_pct: float,
+) -> tuple[list[AnalysisPerspective], list[str]]:
+    perspectives: list[AnalysisPerspective] = []
+    sources: list[str] = []
+
+    if nav_signal_pct is not None:
+        sources.append("外部传入估值信号（--nav-signal-pct）")
+        gap_text = f"，与重仓股估算差{signal_gap:+.2f}个百分点" if signal_gap is not None else ""
+        perspectives.append(
+            AnalysisPerspective(
+                angle="估值信号",
+                signal_pct=nav_signal_pct,
+                confidence="medium",
+                source="外部传入估值信号",
+                interpretation=f"交易阈值优先采用外部估值信号{nav_signal_pct:+.2f}%{gap_text}。",
+            )
+        )
+
+    if platform_estimate and platform_estimate.estimated_fund_pct is not None:
+        sources.append(platform_estimate.source)
+        used = "已作为交易主信号" if signal_source == "fund_platform" else "作为交叉验证"
+        perspectives.append(
+            AnalysisPerspective(
+                angle="基金平台估值",
+                signal_pct=platform_estimate.estimated_fund_pct,
+                confidence="medium",
+                source=platform_estimate.source,
+                interpretation=(
+                    f"平台估值为{platform_estimate.estimated_fund_pct:+.2f}%"
+                    f"（{platform_estimate.estimated_time or '时间未知'}），{used}。"
+                ),
+            )
+        )
+
+    if model:
+        sources.append("东方财富基金F10披露持仓")
+        sources.append("东方财富/新浪实时股票行情")
+        perspectives.append(
+            AnalysisPerspective(
+                angle="披露重仓股贡献",
+                signal_pct=model.estimated_fund_pct,
+                confidence=model.confidence,
+                source="基金F10持仓 + 实时个股涨跌",
+                interpretation=(
+                    f"已匹配持仓权重{model.matched_weight_pct:.2f}%/"
+                    f"披露权重{model.coverage_pct:.2f}%，估算贡献{model.estimated_fund_pct:+.2f}%。"
+                ),
+            )
+        )
+
+        themes = theme_breakdown(model)[:3]
+        if themes:
+            theme_text = "；".join(
+                f"{item['theme']}权重{float(item['weight_pct']):.1f}%、贡献{float(item['contribution_pct']):+.2f}%"
+                for item in themes
+            )
+            perspectives.append(
+                AnalysisPerspective(
+                    angle="主题暴露",
+                    signal_pct=model.estimated_fund_pct,
+                    confidence=model.confidence,
+                    source="重仓股行业/主题归因",
+                    interpretation=f"主要主题贡献：{theme_text}。",
+                )
+            )
+
+        concentration = "高" if model.coverage_pct >= 55 else "中" if model.coverage_pct >= 35 else "低"
+        perspectives.append(
+            AnalysisPerspective(
+                angle="持仓集中度",
+                signal_pct=None,
+                confidence=model.confidence,
+                source="披露前N大持仓占比",
+                interpretation=(
+                    f"披露持仓覆盖{model.coverage_pct:.2f}%，集中度{concentration}；"
+                    f"覆盖越高，重仓股估算越能代表基金当日波动。"
+                ),
+            )
+        )
+
+    indices = fetch_market_indices()
+    if indices:
+        sources.append("东方财富主要指数行情")
+        index_text = "、".join(f"{name}{pct:+.2f}%" for name, pct in indices.items())
+        avg_index = sum(indices.values()) / len(indices)
+        perspectives.append(
+            AnalysisPerspective(
+                angle="市场环境",
+                signal_pct=avg_index,
+                confidence="medium",
+                source="主要A股指数",
+                interpretation=f"主要指数表现：{index_text}；用于判断是系统性回撤还是持仓主题自身拖累。",
+            )
+        )
+
+    buy_zone = position_return <= -abs(first_trigger_pct)
+    sell_zone = position_return >= 8
+    if buy_zone:
+        position_text = f"估算持仓收益{position_return:+.2f}%，已进入-{first_trigger_pct:g}%补仓触发区。"
+    elif sell_zone:
+        position_text = f"估算持仓收益{position_return:+.2f}%，处于纪律性止盈观察区。"
+    else:
+        position_text = f"估算持仓收益{position_return:+.2f}%，未进入补仓区，也未达到高盈利止盈区。"
+    perspectives.append(
+        AnalysisPerspective(
+            angle="账户收益位置",
+            signal_pct=position_return,
+            confidence="high",
+            source="用户持仓成本/收益率 + 今日估算",
+            interpretation=position_text,
+        )
+    )
+
+    if signal_source == "holdings":
+        selected_text = f"本次交易主信号采用披露重仓股估算{daily_pct:+.2f}%。"
+    elif signal_source == "fund_platform":
+        selected_text = f"本次交易主信号采用基金平台估值{daily_pct:+.2f}%。"
+    else:
+        selected_text = f"本次交易主信号采用外部传入估值{daily_pct:+.2f}%。"
+    perspectives.append(
+        AnalysisPerspective(
+            angle="汇总信号",
+            signal_pct=daily_pct,
+            confidence="high" if signal_source == "nav_signal" else "medium",
+            source=signal_source,
+            interpretation=selected_text,
+        )
+    )
+
+    deduped_sources = list(dict.fromkeys(sources))
+    return perspectives, deduped_sources
+
+
 def projected_return_pct(return_rate_pct: float | None, cost_nav: float | None, estimated_nav: float | None) -> float:
     if cost_nav and estimated_nav and cost_nav > 0:
         return (estimated_nav / cost_nav - 1) * 100
@@ -415,15 +643,33 @@ def sell_ratio(position_return_pct: float, daily_pct: float, confidence: str, ma
     return 0.0, "涨幅或盈利不足，不卖"
 
 
-def choose_daily_signal(model: HoldingModel | None, nav_signal_pct: float | None) -> tuple[float, str, float | None, str]:
+def choose_daily_signal(
+    model: HoldingModel | None,
+    nav_signal_pct: float | None,
+    platform_estimate: FundPlatformEstimate | None,
+) -> tuple[float, str, float | None, str]:
     holdings_pct = model.estimated_fund_pct if model else None
-    if nav_signal_pct is None:
-        return holdings_pct or 0.0, "holdings", None, model.confidence if model else "none"
-    signal_gap = nav_signal_pct - holdings_pct if holdings_pct is not None else None
-    confidence = model.confidence if model else "medium"
+    if nav_signal_pct is not None:
+        signal_gap = nav_signal_pct - holdings_pct if holdings_pct is not None else None
+        confidence = model.confidence if model else "medium"
+        if confidence in {"none", "low"}:
+            confidence = "medium"
+        return nav_signal_pct, "nav_signal", signal_gap, confidence
+
+    platform_pct = platform_estimate.estimated_fund_pct if platform_estimate else None
+    if platform_pct is not None:
+        signal_gap = platform_pct - holdings_pct if holdings_pct is not None else None
+        confidence = model.confidence if model else "medium"
+        if signal_gap is not None and abs(signal_gap) >= 1.5:
+            confidence = "medium"
+        if confidence in {"none", "low"}:
+            confidence = "medium"
+        return platform_pct, "fund_platform", signal_gap, confidence
+
+    confidence = model.confidence if model else "none"
     if confidence in {"none", "low"}:
-        confidence = "medium"
-    return nav_signal_pct, "nav_signal", signal_gap, confidence
+        confidence = "low" if model else "none"
+    return holdings_pct or 0.0, "holdings", None, confidence
 
 
 def make_decision(
@@ -436,12 +682,17 @@ def make_decision(
     return_rate_pct: float | None,
     model: HoldingModel | None,
     nav_signal_pct: float | None,
+    platform_estimate: FundPlatformEstimate | None,
     first_trigger_pct: float,
     max_buy_ratio: float,
     max_sell_ratio: float,
 ) -> TradeDecision:
-    daily_pct, signal_source, signal_gap, confidence = choose_daily_signal(model, nav_signal_pct)
-    if signal_source == "nav_signal" and last_nav:
+    daily_pct, signal_source, signal_gap, confidence = choose_daily_signal(model, nav_signal_pct, platform_estimate)
+    if signal_source == "fund_platform" and platform_estimate and platform_estimate.estimated_nav:
+        estimated_nav = platform_estimate.estimated_nav
+    elif signal_source == "nav_signal" and last_nav:
+        estimated_nav = last_nav * (1 + daily_pct / 100)
+    elif signal_source == "fund_platform" and last_nav:
         estimated_nav = last_nav * (1 + daily_pct / 100)
     else:
         estimated_nav = model.estimated_nav if model else last_nav
@@ -462,6 +713,16 @@ def make_decision(
         else:
             mode, ratio, reason, action = "watch", 0.0, f"{buy_reason}；{sell_reason}", "观察"
     amount = holding_value * ratio / 100
+    perspectives, data_sources = build_analysis_perspectives(
+        model=model,
+        platform_estimate=platform_estimate,
+        nav_signal_pct=nav_signal_pct,
+        daily_pct=daily_pct,
+        signal_source=signal_source,
+        signal_gap=signal_gap,
+        position_return=position_return,
+        first_trigger_pct=first_trigger_pct,
+    )
     return TradeDecision(
         mode=mode,
         action=action,
@@ -474,9 +735,10 @@ def make_decision(
         cost_nav=cost_nav,
         last_nav=last_nav,
         estimated_nav=estimated_nav,
-        estimated_fund_pct=daily_pct if model or nav_signal_pct is not None else None,
+        estimated_fund_pct=daily_pct if model or nav_signal_pct is not None or platform_estimate is not None else None,
         holdings_estimated_fund_pct=model.estimated_fund_pct if model else None,
         nav_signal_pct=nav_signal_pct,
+        platform_estimated_fund_pct=platform_estimate.estimated_fund_pct if platform_estimate else None,
         signal_source=signal_source,
         signal_gap_pct=signal_gap,
         coverage_pct=model.coverage_pct if model else None,
@@ -484,6 +746,8 @@ def make_decision(
         estimated_position_return_pct=position_return,
         confidence=confidence,
         driver_reason=driver_reason(model),
+        analysis_perspectives=perspectives,
+        data_sources=data_sources,
         checked_at=china_now().strftime("%Y-%m-%d %H:%M"),
     )
 
@@ -495,12 +759,30 @@ def print_decision(d: TradeDecision) -> None:
     print(f"比例：{d.ratio_pct:.0f}%")
     print(f"原因：{d.reason}")
     print(f"持仓驱动：{d.driver_reason}")
+    print(f"主信号来源：{d.signal_source}")
     if d.estimated_fund_pct is not None:
         print(f"预估今日净值变化：{d.estimated_fund_pct:+.2f}%")
     else:
         print("预估今日净值变化：无持仓估算")
+    if d.holdings_estimated_fund_pct is not None:
+        print(f"披露持仓估算：{d.holdings_estimated_fund_pct:+.2f}%")
+    if d.platform_estimated_fund_pct is not None:
+        print(f"基金平台估值：{d.platform_estimated_fund_pct:+.2f}%")
+    if d.nav_signal_pct is not None:
+        print(f"外部估值信号：{d.nav_signal_pct:+.2f}%")
+    if d.signal_gap_pct is not None:
+        print(f"主信号与持仓估算差：{d.signal_gap_pct:+.2f} 个百分点")
     print(f"预估持仓收益率：{d.estimated_position_return_pct:+.2f}%")
     print(f"置信度：{d.confidence}")
+    if d.analysis_perspectives:
+        print("多角度解读：")
+        for item in d.analysis_perspectives:
+            signal = "" if item.signal_pct is None else f"（信号{item.signal_pct:+.2f}%）"
+            print(f"- {item.angle}{signal}：{item.interpretation}")
+    if d.data_sources:
+        print("数据源：")
+        for source in d.data_sources:
+            print(f"- {source}")
     print(f"基金：{d.fund_code} {d.fund_name or '-'}")
     print(f"持有市值：{d.holding_value:.2f} 元")
     if d.cost_nav:
@@ -543,12 +825,14 @@ def main() -> int:
             print(json.dumps({"action": "不分析", "reason": msg}, ensure_ascii=False) if args.json else msg)
             return 3
 
+    platform_estimate = get_fund_platform_estimate(args.fund_code)
     fund_name = args.fund_name
     last_nav = args.last_nav
     if not fund_name or last_nav is None:
-        fetched_name, fetched_nav, _ = get_latest_fund_nav(args.fund_code)
-        fund_name = fund_name or fetched_name
-        last_nav = last_nav or fetched_nav
+        fund_name = fund_name or (platform_estimate.fund_name if platform_estimate else "")
+        last_nav = last_nav or (platform_estimate.last_nav if platform_estimate else None)
+        if last_nav is None and platform_estimate:
+            last_nav = platform_estimate.estimated_nav
 
     model = estimate_from_holdings(args.fund_code, last_nav, args.holdings_limit, args.holdings_year)
     if model is None and args.return_rate_pct is None:
@@ -567,6 +851,7 @@ def main() -> int:
             return_rate_pct=args.return_rate_pct,
             model=model,
             nav_signal_pct=args.nav_signal_pct,
+            platform_estimate=platform_estimate,
             first_trigger_pct=args.first_trigger_pct,
             max_buy_ratio=args.max_buy_ratio,
             max_sell_ratio=args.max_sell_ratio,

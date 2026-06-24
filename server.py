@@ -402,10 +402,15 @@ def run_purchase_analysis(payload: dict) -> dict:
     module = load_skill_module()
     fund_name = str(payload.get("fundName") or "").strip()
     nav = optional_float(payload, "lastNav")
+    platform_estimate = module.get_fund_platform_estimate(fund_code) if hasattr(module, "get_fund_platform_estimate") else None
     if not fund_name or nav is None:
-        fetched_name, fetched_nav, nav_date = module.get_latest_fund_nav(fund_code)
-        fund_name = fund_name or fetched_name
-        nav = nav or fetched_nav
+        fund_name = fund_name or (platform_estimate.fund_name if platform_estimate else "")
+        nav = nav or (platform_estimate.last_nav if platform_estimate else None)
+        if nav is None and platform_estimate:
+            nav = platform_estimate.estimated_nav
+        nav_date = (platform_estimate.last_nav_date if platform_estimate else "") or (
+            platform_estimate.estimated_time if platform_estimate else ""
+        )
     else:
         nav_date = ""
     model = module.estimate_from_holdings(fund_code, nav, 20, None)
@@ -424,8 +429,82 @@ def run_purchase_analysis(payload: dict) -> dict:
     news = fetch_recent_news(keywords)
     market_avg = average_pct(market)
     us_avg = average_pct(us)
+    holdings_daily = model.estimated_fund_pct
+    platform_daily = platform_estimate.estimated_fund_pct if platform_estimate else None
+    signal_daily = platform_daily if platform_daily is not None else holdings_daily
+    signal_source = "fund_platform" if platform_daily is not None else "holdings"
+    signal_gap = signal_daily - holdings_daily if signal_daily is not None and holdings_daily is not None else None
+    estimated_nav = (
+        platform_estimate.estimated_nav
+        if platform_estimate and platform_estimate.estimated_nav is not None and signal_source == "fund_platform"
+        else model.estimated_nav
+    )
+    theme_breakdown = module.theme_breakdown(model) if hasattr(module, "theme_breakdown") else []
+    data_sources = ["东方财富基金F10披露持仓", "东方财富/新浪实时股票行情"]
+    if platform_estimate and platform_estimate.estimated_fund_pct is not None:
+        data_sources.insert(0, platform_estimate.source)
+    if market:
+        data_sources.append("东方财富主要指数行情")
+    if us:
+        data_sources.append("Yahoo Finance 美股/ETF代理行情")
+    if news:
+        data_sources.append("东方财富搜索资讯")
+    perspectives = [
+        {
+            "angle": "基金平台估值",
+            "signal_pct": platform_daily,
+            "confidence": "medium" if platform_daily is not None else "none",
+            "source": platform_estimate.source if platform_estimate else "未取到",
+            "interpretation": (
+                f"平台估值为 {platform_daily:+.2f}%（{platform_estimate.estimated_time or '时间未知'}），作为购入分析主信号。"
+                if platform_daily is not None
+                else "未取到基金平台估值，本次使用披露持仓估算。"
+            ),
+        },
+        {
+            "angle": "披露重仓股贡献",
+            "signal_pct": holdings_daily,
+            "confidence": model.confidence,
+            "source": "基金F10持仓 + 实时个股涨跌",
+            "interpretation": f"匹配持仓权重 {model.matched_weight_pct:.2f}% / 披露权重 {model.coverage_pct:.2f}%，估算贡献 {holdings_daily:+.2f}%。",
+        },
+        {
+            "angle": "主题暴露",
+            "signal_pct": holdings_daily,
+            "confidence": model.confidence,
+            "source": "重仓股主题归因",
+            "interpretation": "；".join(
+                f"{item['theme']}权重{float(item['weight_pct']):.1f}%、贡献{float(item['contribution_pct']):+.2f}%"
+                for item in theme_breakdown[:3]
+            )
+            or "主题识别不足。",
+        },
+        {
+            "angle": "市场环境",
+            "signal_pct": market_avg,
+            "confidence": "medium" if market else "none",
+            "source": "主要A股指数",
+            "interpretation": "、".join(f"{item.get('name')} {float(item.get('pct')):+.2f}%" for item in market if item.get("pct") is not None)
+            or "未取到主要指数行情。",
+        },
+        {
+            "angle": "美股/外盘代理",
+            "signal_pct": us_avg,
+            "confidence": "low" if us else "none",
+            "source": "Yahoo Finance",
+            "interpretation": "、".join(f"{item.get('symbol')} {float(item.get('pct')):+.2f}%" for item in us if item.get("pct") is not None)
+            or "未取到相关美股/ETF代理行情。",
+        },
+        {
+            "angle": "汇总信号",
+            "signal_pct": signal_daily,
+            "confidence": model.confidence,
+            "source": signal_source,
+            "interpretation": f"购入分析主信号采用 {'基金平台估值' if signal_source == 'fund_platform' else '披露持仓估算'} {signal_daily:+.2f}%。",
+        },
+    ]
     verdict, score, reason, long_term = purchase_verdict(
-        model.estimated_fund_pct,
+        signal_daily,
         market_avg,
         us_avg,
         model.confidence,
@@ -436,8 +515,12 @@ def run_purchase_analysis(payload: dict) -> dict:
         "fundName": fund_name,
         "lastNav": nav,
         "navDate": nav_date,
-        "estimatedDailyPct": model.estimated_fund_pct,
-        "estimatedNav": model.estimated_nav,
+        "estimatedDailyPct": signal_daily,
+        "estimatedNav": estimated_nav,
+        "holdingsEstimatedDailyPct": holdings_daily,
+        "platformEstimatedDailyPct": platform_daily,
+        "signalSource": signal_source,
+        "signalGapPct": signal_gap,
         "confidence": model.confidence,
         "coveragePct": model.coverage_pct,
         "matchedWeightPct": model.matched_weight_pct,
@@ -448,6 +531,8 @@ def run_purchase_analysis(payload: dict) -> dict:
         "market": market,
         "usProxies": us,
         "news": news,
+        "analysisPerspectives": perspectives,
+        "dataSources": list(dict.fromkeys(data_sources)),
         "verdict": verdict,
         "score": score,
         "reason": reason,

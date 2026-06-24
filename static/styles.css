@@ -599,7 +599,8 @@ select:focus {
 }
 
 .chart-panel,
-.drivers-panel {
+.drivers-panel,
+.insights-panel {
   padding: 18px;
 }
 
@@ -872,6 +873,68 @@ svg {
   white-space: nowrap;
 }
 
+.perspective-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.perspective-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: #fbfcfe;
+}
+
+.perspective-item strong {
+  display: block;
+  color: #26364a;
+  font-size: 14px;
+}
+
+.perspective-item span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.perspective-item b {
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.perspective-item p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #405064;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.source-list span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid #dfe6ef;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: #526174;
+  background: #f8fbff;
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   .shell {
     width: min(100vw - 20px, 720px);
@@ -907,6 +970,7 @@ svg {
   .hero-panel,
   .chart-panel,
   .drivers-panel,
+  .insights-panel,
   .input-panel {
     padding: 14px;
     border-radius: 16px;
